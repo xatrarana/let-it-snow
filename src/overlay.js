@@ -31,7 +31,11 @@ let cfg = {
 };
 let W = innerWidth;
 let H = innerHeight;
-let dpr = window.devicePixelRatio || 1;
+// Draw at no more than 1 canvas pixel per screen point. On a 4K / Retina screen this makes
+// the canvas 4x smaller in memory and much cheaper to composite; soft snow looks the same.
+const MAX_RENDER_SCALE = 1;
+const renderScale = () => Math.min(window.devicePixelRatio || 1, MAX_RENDER_SCALE);
+let dpr = renderScale();
 let flakes = [];
 let extraCount = 0;
 let running = false;
@@ -118,9 +122,12 @@ class Pile {
     for (let i = 0; i < this.n; i++) s += this.bins[i];
     return s;
   }
-  draw(shadowBlur) {
+  draw() {
     const b = this.bins;
     const y = this.y;
+    let peak = 0;
+    for (let i = 0; i < this.n; i++) if (b[i] > peak) peak = b[i];
+    if (peak < 0.3) return; // nothing to draw
     ctx.beginPath();
     let open = false;
     let lastX = 0;
@@ -144,14 +151,20 @@ class Pile {
       ctx.lineTo(lastX + BIN / 2, y);
       ctx.closePath();
     }
-    const grad = ctx.createLinearGradient(0, y - this.max, 0, y);
-    grad.addColorStop(0, theme.pile[0]);
-    grad.addColorStop(1, theme.pile[1]);
-    ctx.fillStyle = grad;
-    ctx.shadowColor = theme.shadow;
-    ctx.shadowBlur = shadowBlur;
+    // Gradient is cached until the pile moves or the theme changes.
+    if (!this.grad || this.gradY !== y || this.gradTheme !== theme) {
+      this.grad = ctx.createLinearGradient(0, y - this.max, 0, y);
+      this.grad.addColorStop(0, theme.pile[0]);
+      this.grad.addColorStop(1, theme.pile[1]);
+      this.gradY = y;
+      this.gradTheme = theme;
+    }
+    ctx.fillStyle = this.grad;
     ctx.fill();
-    ctx.shadowBlur = 0;
+    // A thin soft outline instead of a blurred shadow: looks the same, costs far less per frame.
+    ctx.strokeStyle = theme.shadow;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
   }
   // Knock the snow loose (window moved or closed): it falls as clumps.
   shed() {
@@ -172,31 +185,36 @@ let windowPiles = []; // front-most first
 const windowPileById = new Map();
 
 // ---------- Flakes ----------
-function newFlake(anywhere) {
+// Flakes are reused in place when they land, so the animation creates no garbage
+// (no garbage-collection pauses, steady memory).
+function resetFlake(f, anywhere) {
   // Depth: far flakes are small, slow and faint; near flakes are big and fast.
   const z = Math.random();
   const t = theme;
   const r = t.size[0] + z * z * t.size[1];
-  return {
-    x: Math.random() * W,
-    y: anywhere ? Math.random() * H : -10 - Math.random() * 40 - r * 4,
-    r,
-    vy: t.fall[0] + z * t.fall[1] + Math.random() * 12, // px/s
-    vx: 0,
-    g: 0,
-    term: 0,
-    sway: t.sway[0] + Math.random() * t.sway[1],
-    phase: Math.random() * Math.PI * 2,
-    freq: 0.4 + Math.random() * 1.1,
-    alpha: t.tumble ? 0.8 + z * 0.2 : 0.45 + z * 0.5,
-    z,
-    extra: false,
-    img: t.images[Math.floor(Math.random() * t.images.length)],
-    rot: Math.random() * Math.PI * 2,
-    rotV: (Math.random() - 0.5) * 3, // rad/s
-    flip: Math.random() * Math.PI * 2, // tumbling: the leaf turns over as it falls
-    flipV: 1.2 + Math.random() * 2.5,
-  };
+  f.x = Math.random() * W;
+  f.y = anywhere ? Math.random() * H : -10 - Math.random() * 40 - r * 4;
+  f.r = r;
+  f.vy = t.fall[0] + z * t.fall[1] + Math.random() * 12; // px/s
+  f.vx = 0;
+  f.g = 0;
+  f.term = 0;
+  f.sway = t.sway[0] + Math.random() * t.sway[1];
+  f.phase = Math.random() * Math.PI * 2;
+  f.freq = 0.4 + Math.random() * 1.1;
+  f.alpha = t.tumble ? 0.8 + z * 0.2 : 0.45 + z * 0.5;
+  f.z = z;
+  f.extra = false;
+  f.img = t.images[Math.floor(Math.random() * t.images.length)];
+  f.rot = Math.random() * Math.PI * 2;
+  f.rotV = (Math.random() - 0.5) * 3; // rad/s
+  f.flip = Math.random() * Math.PI * 2; // tumbling: the leaf turns over as it falls
+  f.flipV = 1.2 + Math.random() * 2.5;
+  return f;
+}
+
+function newFlake(anywhere) {
+  return resetFlake({}, anywhere);
 }
 
 // Loose snow thrown around (falls off a window, sprayed by the bulldozer).
@@ -240,7 +258,7 @@ function groundY() {
 function resize() {
   W = innerWidth;
   H = innerHeight;
-  dpr = window.devicePixelRatio || 1;
+  dpr = renderScale();
   canvas.width = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -551,7 +569,7 @@ function update(dt) {
         extraCount--;
         continue;
       }
-      flakes[k] = newFlake(false);
+      resetFlake(f, false);
     }
     if (!f.extra) regular++;
   }
@@ -591,8 +609,8 @@ function frame(t) {
   last = t;
   update(dt);
   ctx.clearRect(0, 0, W, H);
-  for (const p of windowPiles) p.draw(3);
-  ground.draw(6);
+  for (const p of windowPiles) p.draw();
+  ground.draw();
   if (theme.tumble) {
     for (const p of windowPiles) p.drawDecals();
     ground.drawDecals();

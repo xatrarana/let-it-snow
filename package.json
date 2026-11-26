@@ -1,7 +1,7 @@
 {
   "name": "let-it-snow",
   "productName": "Let It Snow",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Snow, autumn leaves or cherry blossoms falling over your desktop, piling up on your taskbar and windows, with a tiny bulldozer and a snow globe Christmas countdown.",
   "main": "src/main.js",
   "author": "Chhatra Rana",
@@ -23,21 +23,38 @@
     "files": [
       "src/**/*",
       "assets/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/koffi/{src,vendor,doc,lib}/**",
+      "!node_modules/koffi/build/koffi/*/*.{exp,lib}",
+      "!node_modules/koffi/build/koffi/{freebsd,openbsd,musl,linux}_*/**"
     ],
     "mac": {
       "category": "public.app-category.entertainment",
       "icon": "assets/icon.png",
       "target": [
-        { "target": "dmg", "arch": ["universal"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
       ],
       "extendInfo": {
         "LSUIElement": true
-      }
+      },
+      "files": [
+        "!node_modules/koffi/build/koffi/win32_*/**"
+      ]
     },
     "win": {
       "icon": "assets/icon.png",
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "files": [
+        "!node_modules/koffi/build/koffi/darwin_*/**"
+      ]
     },
     "nsis": {
       "oneClick": true,
@@ -45,7 +62,21 @@
     },
     "linux": {
       "icon": "assets/icon.png",
-      "target": ["AppImage"]
-    }
+      "target": [
+        "AppImage"
+      ],
+      "files": [
+        "!node_modules/koffi/build/koffi/{darwin,win32}_*/**"
+      ]
+    },
+    "asarUnpack": [
+      "node_modules/koffi/build/**"
+    ],
+    "electronLanguages": [
+      "en-US"
+    ]
+  },
+  "dependencies": {
+    "koffi": "^2.16.4"
   }
 }

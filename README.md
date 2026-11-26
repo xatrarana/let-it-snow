@@ -51,6 +51,24 @@ npm start
 Look for the snowflake in your tray (Windows, bottom right, maybe under the ^ arrow)
 or menu bar (Mac, top right). There is no window or dock icon on purpose.
 
+## Light on memory
+
+Let It Snow is a small Electron app, tuned to stay light while it runs all day:
+
+- Only 3 processes while snowing (app, one renderer, GPU). The countdown widget shares the
+  snow's renderer, and Chromium's network service runs inside the app process.
+- Window positions on Windows come from direct system calls in the app process
+  (via [koffi](https://koffi.dev)), not from a separate helper process.
+- The snow canvas is drawn at 1 pixel per screen point, so 4K and Retina screens don't
+  need a 4x bigger buffer. Snow still runs at a smooth 60 fps.
+- The animation creates no garbage while it runs (flakes are reused), so there are no
+  garbage-collection hiccups and memory stays flat.
+- Turn the snow and the countdown off and every window is closed: just the tray icon is left.
+
+In a test on a 2560×1440 screen at 200% scaling, memory went from about 776 MB across
+5 processes (v0.3.0) to about 486 MB across 3 processes (v0.4.0), and about 226 MB when
+everything is switched off.
+
 ## Build installers
 
 ```bash

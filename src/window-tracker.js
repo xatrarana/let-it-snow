@@ -1,10 +1,10 @@
 // Reports where the open app windows are, front-most first, so snow can settle
-// on their top edges. No native modules and no extra permissions:
-//   - Windows: a small PowerShell helper that calls user32 / dwmapi.
+// on their top edges. No extra permissions needed:
+//   - Windows: calls user32 / dwmapi directly from the main process through koffi
+//              (no extra process; a PowerShell helper is kept only as a fallback).
 //   - macOS:   a small JavaScript for Automation helper that calls
 //              CGWindowListCopyWindowInfo (window bounds need no Screen Recording permission).
-// Each helper prints one JSON line whenever the window list changes:
-//   [{ "id": 123, "x": 10, "y": 20, "w": 800, "h": 600 }, ...]
+// Window lists look like: [{ "id": 123, "x": 10, "y": 20, "w": 800, "h": 600 }, ...]
 
 const { spawn } = require('child_process');
 const readline = require('readline');
@@ -107,12 +107,89 @@ function run() {
 }
 `;
 
+// ---------- Windows: direct API calls (no helper process) ----------
+function startWin32Direct(onList) {
+  const koffi = require('koffi');
+  const user32 = koffi.load('user32.dll');
+  const dwmapi = koffi.load('dwmapi.dll');
+  koffi.proto('int __stdcall SnowEnumProc(void *hwnd, intptr_t lParam)');
+  const EnumWindows = user32.func('int __stdcall EnumWindows(SnowEnumProc *cb, intptr_t lParam)');
+  const IsWindowVisible = user32.func('int __stdcall IsWindowVisible(void *hwnd)');
+  const IsIconic = user32.func('int __stdcall IsIconic(void *hwnd)');
+  const GetWindowLongW = user32.func('long __stdcall GetWindowLongW(void *hwnd, int index)');
+  const GetWindowTextLengthW = user32.func('int __stdcall GetWindowTextLengthW(void *hwnd)');
+  const GetClassNameW = user32.func('int __stdcall GetClassNameW(void *hwnd, void *buf, int max)');
+  const GetWindowThreadProcessId = user32.func('uint32_t __stdcall GetWindowThreadProcessId(void *hwnd, void *pid)');
+  const DwmGetWindowAttribute = dwmapi.func('long __stdcall DwmGetWindowAttribute(void *hwnd, uint32_t attr, void *out, uint32_t size)');
+
+  const SKIP_CLASSES = new Set(['Shell_TrayWnd', 'Shell_SecondaryTrayWnd', 'Progman', 'WorkerW']);
+  // Reused buffers: polling allocates almost nothing.
+  const pidBuf = Buffer.alloc(4);
+  const intBuf = Buffer.alloc(4);
+  const rectBuf = Buffer.alloc(16);
+  const classBuf = Buffer.alloc(128);
+
+  function list() {
+    const out = [];
+    EnumWindows((hwnd) => {
+      if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return 1;
+      if (GetWindowLongW(hwnd, -20) & 0x80) return 1; // WS_EX_TOOLWINDOW
+      if (GetWindowTextLengthW(hwnd) === 0) return 1;
+      GetWindowThreadProcessId(hwnd, pidBuf);
+      if (pidBuf.readUInt32LE(0) === process.pid) return 1; // our own windows
+      if (DwmGetWindowAttribute(hwnd, 14, intBuf, 4) === 0 && intBuf.readInt32LE(0) !== 0) return 1; // cloaked
+      const n = GetClassNameW(hwnd, classBuf, 64);
+      if (SKIP_CLASSES.has(classBuf.toString('utf16le', 0, n * 2))) return 1;
+      if (DwmGetWindowAttribute(hwnd, 9, rectBuf, 16) !== 0) return 1; // visible frame bounds
+      const l = rectBuf.readInt32LE(0);
+      const t = rectBuf.readInt32LE(4);
+      const w = rectBuf.readInt32LE(8) - l;
+      const h = rectBuf.readInt32LE(12) - t;
+      if (w < 120 || h < 60) return 1;
+      out.push({ id: Number(koffi.address(hwnd)), x: l, y: t, w, h });
+      return 1;
+    }, 0);
+    return out;
+  }
+
+  let last = '';
+  const tick = () => {
+    const wins = list();
+    const key = JSON.stringify(wins);
+    if (key !== last) {
+      last = key;
+      onList(wins);
+    }
+  };
+  tick(); // throws here (not later) if anything is wrong, so we can fall back
+  const timer = setInterval(() => {
+    try {
+      tick();
+    } catch (e) {
+      console.warn('[window-tracker]', e.message);
+    }
+  }, POLL_MS);
+  return () => clearInterval(timer);
+}
+
 /**
  * Start watching windows. Calls onUpdate(windows) with rects in screen DIPs
  * (the same coordinates Electron uses), front-most window first.
  * Returns a stop() function. Does nothing on unsupported platforms.
  */
 function startWindowTracker(onUpdate, { toDip } = {}) {
+  const emit = (wins) => onUpdate(toDip ? wins.map(toDip) : wins);
+  if (process.platform === 'win32') {
+    try {
+      return startWin32Direct(emit);
+    } catch (e) {
+      console.warn('[window-tracker] direct mode unavailable, using PowerShell helper:', e.message);
+    }
+  }
+  return startHelperProcess(emit);
+}
+
+function startHelperProcess(emit) {
   let child;
   if (process.platform === 'win32') {
     const script = WINDOWS_SCRIPT.replace(/__PID__/g, String(process.pid)).replace('__POLL__', String(POLL_MS));
@@ -138,7 +215,7 @@ function startWindowTracker(onUpdate, { toDip } = {}) {
       return;
     }
     if (!Array.isArray(wins)) return;
-    onUpdate(toDip ? wins.map(toDip) : wins);
+    emit(wins);
   });
   child.stderr.on('data', (d) => console.warn('[window-tracker]', String(d).trim()));
   child.on('exit', (code) => {

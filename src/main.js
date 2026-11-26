@@ -54,6 +54,13 @@ function overlayConfig(display) {
   };
 }
 
+// Lean renderer settings shared by every window.
+const WEB_PREFS = {
+  preload: path.join(__dirname, 'preload.js'),
+  spellcheck: false,
+  devTools: !app.isPackaged,
+};
+
 function createOverlay(display) {
   const { bounds } = display;
   const win = new BrowserWindow({
@@ -73,10 +80,7 @@ function createOverlay(display) {
     fullscreenable: false,
     enableLargerThanScreen: true,
     show: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: false,
-    },
+    webPreferences: { ...WEB_PREFS, backgroundThrottling: false },
   });
   win.setIgnoreMouseEvents(true); // clicks pass straight through to whatever is below
   win.setAlwaysOnTop(true, 'screen-saver');
@@ -84,41 +88,56 @@ function createOverlay(display) {
   win.setBounds(bounds); // macOS can clamp the initial size below the menu bar
   win.loadFile(path.join(__dirname, 'overlay.html'));
   win.webContents.on('did-finish-load', () => {
+    win.loaded = true;
     win.webContents.send('config', overlayConfig(display));
     sendWindows();
     if (settings.snowing) win.showInactive();
+    if (display.id === screen.getPrimaryDisplay().id && settings.showWidget && !widget) createWidget();
   });
+  // The countdown widget is opened from the primary overlay with window.open, so it
+  // shares that overlay's renderer process instead of starting another one (~100 MB less).
+  win.webContents.setWindowOpenHandler(({ url }) =>
+    url.endsWith('widget.html') ? { action: 'allow', overrideBrowserWindowOptions: widgetOptions() } : { action: 'deny' }
+  );
+  win.webContents.on('did-create-window', (child) => setupWidget(child));
   overlays.set(display.id, win);
 }
 
-function syncOverlays() {
+// Which displays need an overlay window right now:
+//   snowing         -> every display
+//   only countdown  -> just the primary one (hidden), which hosts the widget
+//   neither         -> none at all, so the app idles with only the tray icon
+function wantedOverlayDisplays() {
   const displays = screen.getAllDisplays();
-  const ids = new Set(displays.map((d) => d.id));
+  if (settings.snowing) return displays;
+  if (settings.showWidget) return [screen.getPrimaryDisplay()];
+  return [];
+}
+
+function syncOverlays() {
+  const wanted = wantedOverlayDisplays();
+  const ids = new Set(wanted.map((d) => d.id));
   for (const [id, win] of overlays) {
     if (!ids.has(id)) {
       win.destroy();
       overlays.delete(id);
     }
   }
-  for (const d of displays) {
+  for (const d of wanted) {
     const win = overlays.get(d.id);
     if (!win) {
       createOverlay(d);
     } else {
       win.setBounds(d.bounds);
-      win.webContents.send('config', overlayConfig(d));
+      if (win.loaded) win.webContents.send('config', overlayConfig(d));
+      if (settings.snowing) win.showInactive();
+      else win.hide();
     }
   }
 }
 
 function applySnowSettings() {
-  for (const d of screen.getAllDisplays()) {
-    const win = overlays.get(d.id);
-    if (!win) continue;
-    win.webContents.send('config', overlayConfig(d));
-    if (settings.snowing) win.showInactive();
-    else win.hide();
-  }
+  syncOverlays();
   syncWindowTracker();
 }
 
@@ -185,9 +204,9 @@ function defaultWidgetPos() {
   return { x: wa.x + wa.width - WIDGET_W - 24, y: wa.y + wa.height - WIDGET_H - 24 };
 }
 
-function createWidget() {
+function widgetOptions() {
   const pos = settings.widgetPos || defaultWidgetPos();
-  widget = new BrowserWindow({
+  return {
     x: pos.x,
     y: pos.y,
     width: WIDGET_W,
@@ -202,14 +221,27 @@ function createWidget() {
     maximizable: false,
     minimizable: false,
     show: false,
-    webPreferences: { preload: path.join(__dirname, 'preload.js') },
+    webPreferences: { ...WEB_PREFS, backgroundThrottling: true },
+  };
+}
+
+function setupWidget(win) {
+  widget = win;
+  win.setVisibleOnAllWorkspaces(true);
+  win.webContents.once('did-finish-load', () => {
+    if (settings.showWidget) win.showInactive();
+    else win.close();
   });
-  widget.setVisibleOnAllWorkspaces(true);
-  widget.loadFile(path.join(__dirname, 'widget.html'));
-  widget.once('ready-to-show', () => {
-    if (settings.showWidget) widget.showInactive();
+  win.on('closed', () => {
+    if (widget === win) widget = null;
   });
-  widget.on('closed', () => (widget = null));
+}
+
+function createWidget() {
+  const host = overlays.get(screen.getPrimaryDisplay().id);
+  if (!host) return syncOverlays(); // the host overlay creates the widget once it has loaded
+  if (!host.loaded || widget) return;
+  host.webContents.executeJavaScript("window.open('widget.html', 'snowglobe')", true).catch(() => {});
 }
 
 ipcMain.on('widget-drag', (_e, dx, dy) => {
@@ -223,17 +255,16 @@ ipcMain.on('widget-drag-end', () => {
   settings.widgetPos = { x, y };
   saveSettings();
 });
-ipcMain.on('widget-hide', () => {
-  settings.showWidget = false;
-  saveSettings();
-  widget?.hide();
-  rebuildMenu();
-});
+ipcMain.on('widget-hide', () => setAndApply({ showWidget: false }, applyWidgetSettings));
 
 function applyWidgetSettings() {
-  if (!widget) createWidget();
-  if (settings.showWidget) widget.showInactive();
-  else widget.hide();
+  if (settings.showWidget) {
+    syncOverlays();
+    createWidget();
+  } else {
+    widget?.close(); // free it completely rather than keeping a hidden window around
+    syncOverlays();
+  }
 }
 
 // ---------- Tray / menu bar ----------
@@ -371,18 +402,30 @@ if (!app.requestSingleInstanceLock()) {
 
   // Transparent windows on Linux need this; harmless elsewhere.
   if (process.platform === 'linux') app.commandLine.appendSwitch('enable-transparent-visuals');
+  // Trim Chromium down for a small tray app:
+  //  - run the network service inside the main process (one process fewer; we never go online)
+  //  - no spare pre-launched renderer, no media keys / media session handling
+  //  - no native occlusion tracking (our overlay covers the screen and would confuse it)
+  app.commandLine.appendSwitch('enable-features', 'NetworkServiceInProcess2');
+  app.commandLine.appendSwitch(
+    'disable-features',
+    'SpareRendererForSitePerProcess,CalculateNativeWinOcclusion,HardwareMediaKeyHandling,MediaSessionService,WebRtcHideLocalIpsWithMdns'
+  );
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
   app.whenReady().then(() => {
     if (isMac) app.dock?.hide(); // menu bar app, no dock icon
     loadSettings();
     createTray();
-    syncOverlays();
+    syncOverlays(); // the primary overlay opens the countdown widget once it has loaded
     syncWindowTracker();
-    createWidget();
     if (process.env.SNOW_BULLDOZE_AFTER) setTimeout(bulldoze, Number(process.env.SNOW_BULLDOZE_AFTER));
     screen.on('display-added', syncOverlays);
     screen.on('display-removed', syncOverlays);
-    screen.on('display-metrics-changed', syncOverlays);
+    screen.on('display-metrics-changed', () => {
+      syncOverlays();
+      sendWindows();
+    });
   });
 
   // Keep running in the tray even with no visible windows.
