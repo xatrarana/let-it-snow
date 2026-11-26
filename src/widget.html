@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #globe { display: block; cursor: grab; }
+    #globe.dragging { cursor: grabbing; }
+    #close { position: absolute; top: 6px; right: 10px; width: 22px; height: 22px; border-radius: 11px;
+      border: none; background: rgba(20,30,50,0.65); color: #fff; font-size: 14px; line-height: 22px;
+      padding: 0; cursor: pointer; opacity: 0; transition: opacity .15s; }
+    body:hover #close { opacity: 1; }
+  </style>
+</head>
+<body>
+  <canvas id="globe" title="Click to shake, drag to move"></canvas>
+  <button id="close" title="Hide countdown (bring it back from the snowflake menu)">×</button>
+  <script src="widget.js"></script>
+</body>
+</html>
