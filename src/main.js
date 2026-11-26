@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Tray, Menu, screen, ipcMain, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { startWindowTracker } = require('./window-tracker');
 
 const isMac = process.platform === 'darwin';
 const ASSETS = path.join(__dirname, '..', 'assets');
@@ -10,6 +11,8 @@ const DEFAULTS = {
   snowing: true,
   intensity: 'medium', // light | medium | heavy | blizzard
   pileUp: true,
+  windowSnow: true, // snow settles on top of open windows
+  autoPlow: true, // bulldozer comes by on its own when the snow gets deep
   showWidget: true,
   widgetPos: null, // {x, y}
 };
@@ -40,6 +43,8 @@ function overlayConfig(display) {
     enabled: settings.snowing,
     intensity: settings.intensity,
     pileUp: settings.pileUp,
+    windowSnow: settings.windowSnow,
+    autoPlow: settings.autoPlow,
     // Snow lands on top of the taskbar / dock: the bottom of the work area.
     groundY: workArea.y + workArea.height - bounds.y,
     width: bounds.width,
@@ -78,6 +83,7 @@ function createOverlay(display) {
   win.loadFile(path.join(__dirname, 'overlay.html'));
   win.webContents.on('did-finish-load', () => {
     win.webContents.send('config', overlayConfig(display));
+    sendWindows();
     if (settings.snowing) win.showInactive();
   });
   overlays.set(display.id, win);
@@ -110,6 +116,60 @@ function applySnowSettings() {
     win.webContents.send('config', overlayConfig(d));
     if (settings.snowing) win.showInactive();
     else win.hide();
+  }
+  syncWindowTracker();
+}
+
+function bulldoze() {
+  for (const win of overlays.values()) win.webContents.send('bulldoze');
+}
+
+// ---------- Open windows, so snow can settle on their top edges ----------
+let stopTracker = null;
+let lastWindows = [];
+
+function sendWindows() {
+  for (const d of screen.getAllDisplays()) {
+    const win = overlays.get(d.id);
+    if (!win) continue;
+    const b = d.bounds;
+    // Front-most first, in this overlay's own coordinates.
+    const local = lastWindows
+      .filter((w) => w.x < b.x + b.width && w.x + w.w > b.x && w.y < b.y + b.height && w.y + w.h > b.y)
+      .map((w) => ({ id: w.id, x: w.x - b.x, y: w.y - b.y, w: w.w, h: w.h }));
+    win.webContents.send('windows', local);
+  }
+}
+
+function toDip(w) {
+  // Windows reports physical pixels; convert to Electron's DIPs (handles mixed-DPI monitors).
+  if (process.platform !== 'win32') return w;
+  const r = screen.screenToDipRect(null, { x: w.x, y: w.y, width: w.w, height: w.h });
+  return { id: w.id, x: r.x, y: r.y, w: r.width, h: r.height };
+}
+
+function syncWindowTracker() {
+  const want = settings.snowing && settings.windowSnow;
+  if (want && !stopTracker) {
+    if (process.env.SNOW_FAKE_WINDOWS) {
+      // Development aid: pretend these windows are open (JSON array of {id,x,y,w,h}).
+      lastWindows = JSON.parse(process.env.SNOW_FAKE_WINDOWS);
+      sendWindows();
+      stopTracker = () => {};
+    } else {
+      stopTracker = startWindowTracker(
+        (wins) => {
+          lastWindows = wins;
+          sendWindows();
+        },
+        { toDip }
+      );
+    }
+  } else if (!want && stopTracker) {
+    stopTracker();
+    stopTracker = null;
+    lastWindows = [];
+    sendWindows();
   }
 }
 
@@ -215,6 +275,24 @@ function rebuildMenu() {
       checked: settings.pileUp,
       click: (item) => setAndApply({ pileUp: item.checked }, applySnowSettings),
     },
+    ...(isMac || process.platform === 'win32'
+      ? [
+          {
+            label: 'Snow on top of windows',
+            type: 'checkbox',
+            checked: settings.windowSnow,
+            click: (item) => setAndApply({ windowSnow: item.checked }, applySnowSettings),
+          },
+        ]
+      : []),
+    { type: 'separator' },
+    { label: 'Send the bulldozer', enabled: settings.snowing, click: bulldoze },
+    {
+      label: 'Bulldozer clears deep snow on its own',
+      type: 'checkbox',
+      checked: settings.autoPlow,
+      click: (item) => setAndApply({ autoPlow: item.checked }, applySnowSettings),
+    },
     { type: 'separator' },
     {
       label: 'Show Christmas countdown',
@@ -274,7 +352,9 @@ if (!app.requestSingleInstanceLock()) {
     loadSettings();
     createTray();
     syncOverlays();
+    syncWindowTracker();
     createWidget();
+    if (process.env.SNOW_BULLDOZE_AFTER) setTimeout(bulldoze, Number(process.env.SNOW_BULLDOZE_AFTER));
     screen.on('display-added', syncOverlays);
     screen.on('display-removed', syncOverlays);
     screen.on('display-metrics-changed', syncOverlays);
@@ -282,4 +362,5 @@ if (!app.requestSingleInstanceLock()) {
 
   // Keep running in the tray even with no visible windows.
   app.on('window-all-closed', () => {});
+  app.on('before-quit', () => stopTracker?.());
 }

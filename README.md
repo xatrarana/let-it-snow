@@ -10,16 +10,26 @@ and shows a snow globe counting down to Christmas.
 - **Snow over everything.** A transparent, always-on-top layer on every monitor. Clicks go
   straight through it, so you can keep working.
 - **Snow piles up** on top of your taskbar (Windows) or dock (Mac), and melts very slowly.
+- **Snow settles on top of your open windows.** Move or close a window and the snow falls off.
+  Only the parts of a window's top edge you can actually see collect snow.
+- **A little bulldozer** drives along the taskbar / dock and pushes the pile off the screen.
+  Send it from the menu, or let it come by on its own when the snow gets deep.
 - **Snowflake icon** in the system tray / menu bar:
   - Let it snow (on/off)
   - How much snow: Light flurries, Gentle snow, Heavy snow, Blizzard
   - Pile up on the taskbar / dock
+  - Snow on top of windows
+  - Send the bulldozer, Bulldozer clears deep snow on its own
   - Show Christmas countdown, Reset countdown position
   - Start when I log in
 - **Snow globe countdown.** Shows days, hours and minutes until Christmas. Click it to shake
   the globe, drag it to move it, hover and press × to hide it.
 
 Settings are saved between launches.
+
+| Bulldozer | Snow falling off a moved window |
+| --- | --- |
+| ![bulldozer](docs/bulldozer.png) | ![window snow](docs/window-snow.png) |
 
 ## Run it
 
@@ -45,11 +55,22 @@ The builds are **unsigned** for now. Windows will show a SmartScreen warning ("M
 signing: an Apple Developer ID ($99/year, plus notarization) and a Windows code signing
 certificate.
 
+## Developing
+
+Two environment variables help when testing on a machine without real windows:
+
+```bash
+SNOW_FAKE_WINDOWS='[{"id":1,"x":200,"y":200,"w":700,"h":450}]' npm start   # pretend a window is open
+SNOW_BULLDOZE_AFTER=20000 npm start                                       # send the bulldozer after 20 s
+```
+
 ## Project layout
 
 ```
 src/main.js      tray menu, overlay windows (one per monitor), widget window, settings
-src/overlay.*    the falling snow + pile-up (canvas)
+src/overlay.*    the falling snow, snow piles and the bulldozer (canvas)
+src/window-tracker.js  reads open window positions (PowerShell on Windows,
+                 JavaScript for Automation on macOS), no native modules or permissions
 src/widget.*     the snow globe countdown (canvas)
 src/preload.js   small safe bridge between the windows and main
 assets/          app + tray icons
@@ -57,7 +78,6 @@ assets/          app + tray icons
 
 ## Ideas for next versions
 
-- Snow settling on the top edges of open windows (needs native window positions per OS)
 - Sweep the pile away with the mouse
 - Themes: New Year fireworks, falling leaves, cherry blossoms
 - Custom countdown dates (birthdays, holidays, launches)
