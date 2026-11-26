@@ -2,7 +2,7 @@
   "name": "let-it-snow",
   "productName": "Let It Snow",
   "version": "0.3.0",
-  "description": "Gentle snow falling on your desktop, plus a snow globe Christmas countdown.",
+  "description": "Snow, autumn leaves or cherry blossoms falling over your desktop, piling up on your taskbar and windows, with a tiny bulldozer and a snow globe Christmas countdown.",
   "main": "src/main.js",
   "author": "Chhatra Rana",
   "license": "UNLICENSED",
