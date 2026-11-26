@@ -12,6 +12,7 @@ const DEFAULTS = {
   intensity: 'medium', // light | medium | heavy | blizzard
   pileUp: true,
   windowSnow: true, // snow settles on top of open windows
+  theme: 'snow', // snow | leaves | blossoms
   autoPlow: true, // bulldozer comes by on its own when the snow gets deep
   showWidget: true,
   widgetPos: null, // {x, y}
@@ -45,6 +46,7 @@ function overlayConfig(display) {
     pileUp: settings.pileUp,
     windowSnow: settings.windowSnow,
     autoPlow: settings.autoPlow,
+    theme: settings.theme,
     // Snow lands on top of the taskbar / dock: the bottom of the work area.
     groundY: workArea.y + workArea.height - bounds.y,
     width: bounds.width,
@@ -246,6 +248,14 @@ function setAndApply(patch, apply) {
 
 function rebuildMenu() {
   if (!tray) return;
+  const noun = { snow: 'Snow', leaves: 'Leaves', blossoms: 'Petals' }[settings.theme] || 'Snow';
+  const snowy = settings.theme === 'snow';
+  const theme = (id, label) => ({
+    label,
+    type: 'radio',
+    checked: settings.theme === id,
+    click: () => setAndApply({ theme: id, snowing: true }, applySnowSettings),
+  });
   const level = (id, label) => ({
     label,
     type: 'radio',
@@ -255,19 +265,34 @@ function rebuildMenu() {
   const loginSupported = isMac || process.platform === 'win32';
   const menu = Menu.buildFromTemplate([
     {
-      label: 'Let it snow',
+      label: snowy ? 'Let it snow' : `Let the ${noun.toLowerCase()} fall`,
       type: 'checkbox',
       checked: settings.snowing,
       click: (item) => setAndApply({ snowing: item.checked }, applySnowSettings),
     },
     {
-      label: 'How much snow',
+      label: 'Theme',
       submenu: [
-        level('light', 'Light flurries'),
-        level('medium', 'Gentle snow'),
-        level('heavy', 'Heavy snow'),
-        level('blizzard', 'Blizzard'),
+        theme('snow', '❄️  Snow'),
+        theme('leaves', '🍁  Autumn leaves'),
+        theme('blossoms', '🌸  Cherry blossoms'),
       ],
+    },
+    {
+      label: snowy ? 'How much snow' : 'How many',
+      submenu: snowy
+        ? [
+            level('light', 'Light flurries'),
+            level('medium', 'Gentle snow'),
+            level('heavy', 'Heavy snow'),
+            level('blizzard', 'Blizzard'),
+          ]
+        : [
+            level('light', 'A few'),
+            level('medium', 'Gentle'),
+            level('heavy', 'Lots'),
+            level('blizzard', 'Windy storm'),
+          ],
     },
     {
       label: 'Pile up on the taskbar / dock',
@@ -278,7 +303,7 @@ function rebuildMenu() {
     ...(isMac || process.platform === 'win32'
       ? [
           {
-            label: 'Snow on top of windows',
+            label: `${noun} on top of windows`,
             type: 'checkbox',
             checked: settings.windowSnow,
             click: (item) => setAndApply({ windowSnow: item.checked }, applySnowSettings),

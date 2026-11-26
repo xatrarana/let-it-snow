@@ -10,12 +10,16 @@ and shows a snow globe counting down to Christmas.
 - **Snow over everything.** A transparent, always-on-top layer on every monitor. Clicks go
   straight through it, so you can keep working.
 - **Snow piles up** on top of your taskbar (Windows) or dock (Mac), and melts very slowly.
+- **Three themes:** ❄️ Snow, 🍁 Autumn leaves (tumbling red, orange and gold leaves) and
+  🌸 Cherry blossoms (fluttering pink petals, with the odd whole flower). Leaves and petals
+  pile up too, and you can see them lying on top of the piles.
 - **Snow settles on top of your open windows.** Move or close a window and the snow falls off.
   Only the parts of a window's top edge you can actually see collect snow.
 - **A little bulldozer** drives along the taskbar / dock and pushes the pile off the screen.
   Send it from the menu, or let it come by on its own when the snow gets deep.
 - **Snowflake icon** in the system tray / menu bar:
   - Let it snow (on/off)
+  - Theme: Snow, Autumn leaves, Cherry blossoms
   - How much snow: Light flurries, Gentle snow, Heavy snow, Blizzard
   - Pile up on the taskbar / dock
   - Snow on top of windows
@@ -30,6 +34,10 @@ Settings are saved between launches.
 | Bulldozer | Snow falling off a moved window |
 | --- | --- |
 | ![bulldozer](docs/bulldozer.png) | ![window snow](docs/window-snow.png) |
+
+| Autumn leaves | Cherry blossoms |
+| --- | --- |
+| ![autumn leaves](docs/theme-leaves.png) | ![cherry blossoms](docs/theme-blossoms.png) |
 
 ## Run it
 
@@ -68,7 +76,8 @@ SNOW_BULLDOZE_AFTER=20000 npm start                                       # send
 
 ```
 src/main.js      tray menu, overlay windows (one per monitor), widget window, settings
-src/overlay.*    the falling snow, snow piles and the bulldozer (canvas)
+src/overlay.*    the falling particles, piles and the bulldozer (canvas)
+src/themes.js    snow, autumn leaves and cherry blossom looks and motion
 src/window-tracker.js  reads open window positions (PowerShell on Windows,
                  JavaScript for Automation on macOS), no native modules or permissions
 src/widget.*     the snow globe countdown (canvas)
@@ -79,5 +88,5 @@ assets/          app + tray icons
 ## Ideas for next versions
 
 - Sweep the pile away with the mouse
-- Themes: New Year fireworks, falling leaves, cherry blossoms
+- More themes: New Year fireworks, rain on the glass
 - Custom countdown dates (birthdays, holidays, launches)

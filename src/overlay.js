@@ -1,4 +1,5 @@
-// Falling snow drawn on a transparent full-screen canvas.
+// Falling snow (or autumn leaves, or cherry blossoms; see themes.js) drawn on a
+// transparent full-screen canvas.
 // Flakes drift with a slowly changing wind and pile up on:
 //   - the taskbar / dock line at the bottom of the screen (the "ground"), and
 //   - the top edges of open windows (snow falls off when a window moves or closes).
@@ -23,6 +24,7 @@ let cfg = {
   pileUp: true,
   windowSnow: true,
   autoPlow: true,
+  theme: 'snow',
   groundY: innerHeight,
   width: innerWidth,
   height: innerHeight,
@@ -35,6 +37,7 @@ let extraCount = 0;
 let running = false;
 let last = 0;
 let windT = Math.random() * 1000;
+let theme = window.THEMES.get('snow');
 
 // ---------- Snow piles ----------
 class Pile {
@@ -47,6 +50,30 @@ class Pile {
     this.n = Math.max(1, Math.ceil(width / BIN));
     this.bins = new Float32Array(this.n);
     this.visible = new Uint8Array(this.n).fill(1);
+    this.decals = []; // leaves / petals lying on top of the pile
+  }
+  clear() {
+    this.bins.fill(0);
+    this.decals = [];
+  }
+  addDecal(f) {
+    const d = { x: f.x, img: f.img, rot: f.rot, size: f.r * theme.drawScale * 0.9 };
+    const cap = Math.max(4, Math.floor(this.n * 0.7));
+    if (this.decals.length < cap) this.decals.push(d);
+    else this.decals[Math.floor(Math.random() * cap)] = d;
+  }
+  drawDecals() {
+    for (const d of this.decals) {
+      const i = this.index(d.x);
+      if (!this.visible[i]) continue;
+      const y = this.y - this.bins[i] + d.size * 0.12;
+      const c = Math.cos(d.rot);
+      const s = Math.sin(d.rot);
+      // lying mostly flat: squashed vertically
+      ctx.setTransform(c * dpr, s * 0.45 * dpr, -s * dpr, c * 0.45 * dpr, d.x * dpr, y * dpr);
+      ctx.drawImage(d.img, -d.size / 2, -d.size / 2, d.size, d.size);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   contains(x) {
     return x >= this.x0 && x < this.x0 + this.width;
@@ -118,10 +145,10 @@ class Pile {
       ctx.closePath();
     }
     const grad = ctx.createLinearGradient(0, y - this.max, 0, y);
-    grad.addColorStop(0, 'rgba(255,255,255,0.98)');
-    grad.addColorStop(1, 'rgba(222,236,252,0.96)');
+    grad.addColorStop(0, theme.pile[0]);
+    grad.addColorStop(1, theme.pile[1]);
     ctx.fillStyle = grad;
-    ctx.shadowColor = 'rgba(110,140,185,0.5)';
+    ctx.shadowColor = theme.shadow;
     ctx.shadowBlur = shadowBlur;
     ctx.fill();
     ctx.shadowBlur = 0;
@@ -136,7 +163,7 @@ class Pile {
         spawnExtra(this.x0 + i * BIN + Math.random() * BIN, this.y - Math.random() * h, (Math.random() - 0.5) * 40, Math.random() * 30);
       }
     }
-    this.bins.fill(0);
+    this.clear();
   }
 }
 
@@ -148,21 +175,27 @@ const windowPileById = new Map();
 function newFlake(anywhere) {
   // Depth: far flakes are small, slow and faint; near flakes are big and fast.
   const z = Math.random();
-  const r = 1.1 + z * z * 3.4;
+  const t = theme;
+  const r = t.size[0] + z * z * t.size[1];
   return {
     x: Math.random() * W,
-    y: anywhere ? Math.random() * H : -10 - Math.random() * 40,
+    y: anywhere ? Math.random() * H : -10 - Math.random() * 40 - r * 4,
     r,
-    vy: 22 + z * 55 + Math.random() * 12, // px/s
+    vy: t.fall[0] + z * t.fall[1] + Math.random() * 12, // px/s
     vx: 0,
     g: 0,
     term: 0,
-    sway: 8 + Math.random() * 22,
+    sway: t.sway[0] + Math.random() * t.sway[1],
     phase: Math.random() * Math.PI * 2,
     freq: 0.4 + Math.random() * 1.1,
-    alpha: 0.45 + z * 0.5,
+    alpha: t.tumble ? 0.8 + z * 0.2 : 0.45 + z * 0.5,
     z,
     extra: false,
+    img: t.images[Math.floor(Math.random() * t.images.length)],
+    rot: Math.random() * Math.PI * 2,
+    rotV: (Math.random() - 0.5) * 3, // rad/s
+    flip: Math.random() * Math.PI * 2, // tumbling: the leaf turns over as it falls
+    flipV: 1.2 + Math.random() * 2.5,
   };
 }
 
@@ -177,7 +210,7 @@ function spawnExtra(x, y, vx, vy) {
   f.vy = vy;
   f.g = 260;
   f.term = 45 + Math.random() * 30;
-  f.r = 1.4 + Math.random() * 2.2;
+  f.r = theme.tumble ? theme.size[0] + Math.random() * theme.size[1] * 0.6 : 1.4 + Math.random() * 2.2;
   f.alpha = 0.95;
   f.sway = 4;
   f.extra = true;
@@ -186,7 +219,7 @@ function spawnExtra(x, y, vx, vy) {
 }
 
 function targetCount() {
-  const base = DENSITY[cfg.intensity] ?? DENSITY.medium;
+  const base = (DENSITY[cfg.intensity] ?? DENSITY.medium) * theme.density;
   return Math.round((base * (W * H)) / (1920 * 1080));
 }
 
@@ -293,6 +326,7 @@ function updateBulldozer(dt) {
     ground.bins[i] = 0;
   }
   d.cleared = Math.max(d.cleared, upTo);
+  if (ground.decals.length) ground.decals = ground.decals.filter((dc) => dc.x > blade);
   d.load *= Math.exp(-dt * 0.04); // a little spills away
 
   // Spray a bit of snow off the top of the mound.
@@ -397,8 +431,8 @@ function drawBulldozer() {
   ctx.fillStyle = '#d99a00';
   roundRect(x + 4, y - 49, 28, 4, 2);
   ctx.fill();
-  // Snow on the roof
-  ctx.fillStyle = '#ffffff';
+  // Snow (or leaves / petals) on the roof
+  ctx.fillStyle = theme.roof;
   roundRect(x + 5, y - 52, 26, 4, 2);
   ctx.fill();
   // Blinking beacon
@@ -427,8 +461,8 @@ function drawBulldozer() {
   const m = moundSize(d.load);
   if (m.h > 0.5) {
     const bx = x + BLADE_X - 1;
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = 'rgba(110,140,185,0.5)';
+    ctx.fillStyle = theme.pile[0];
+    ctx.shadowColor = theme.shadow;
     ctx.shadowBlur = 5;
     ctx.beginPath();
     ctx.moveTo(bx, g);
@@ -471,6 +505,10 @@ function update(dt) {
       f.vx *= Math.exp(-dt * 1.5);
     }
     f.phase += f.freq * dt;
+    if (theme.tumble) {
+      f.rot += f.rotV * dt;
+      f.flip += f.flipV * dt;
+    }
     f.y += f.vy * dt;
     f.x += (f.vx + wind * (0.4 + f.z) + Math.sin(f.phase) * f.sway) * dt;
 
@@ -487,7 +525,8 @@ function update(dt) {
         const surface = p.y - p.heightAt(f.x);
         // Hidden parts of an edge (covered by a window in front) are skipped via isVisibleAt.
         if (prevBottom <= surface + 1.5 && bottom >= surface && p.isVisibleAt(f.x)) {
-          p.add(f.x, f.r * 2.2);
+          p.add(f.x, f.r * 2.2 * theme.deposit);
+          if (theme.tumble) p.addDecal(f);
           landed = true;
           break;
         }
@@ -498,7 +537,10 @@ function update(dt) {
       const floor = cfg.pileUp ? g - ground.heightAt(f.x) : g + 20;
       if (bottom >= floor && f.vy > 0) {
         const underDozer = dozer && f.x > dozer.x && f.x < dozer.x + BLADE;
-        if (cfg.pileUp && f.x >= 0 && f.x < W && !underDozer) ground.add(f.x, f.r * 1.3);
+        if (cfg.pileUp && f.x >= 0 && f.x < W && !underDozer) {
+          ground.add(f.x, f.r * 1.3 * theme.deposit);
+          if (theme.tumble) ground.addDecal(f);
+        }
         landed = true;
       }
     }
@@ -520,32 +562,25 @@ function update(dt) {
   updateBulldozer(dt);
 }
 
-// One pre-rendered soft flake sprite, scaled per flake (much faster than shadows).
-const sprite = (() => {
-  const S = 32;
-  const c = document.createElement('canvas');
-  c.width = c.height = S;
-  const g = c.getContext('2d');
-  // faint dark halo so flakes stay visible over white windows
-  let grad = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  grad.addColorStop(0, 'rgba(60,90,130,0.5)');
-  grad.addColorStop(1, 'rgba(70,100,140,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, S, S);
-  grad = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S * 0.3);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.7, 'rgba(255,255,255,0.95)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, S, S);
-  return c;
-})();
-
 function drawFlakes() {
-  for (const f of flakes) {
-    const d = f.r * 3.4;
-    ctx.globalAlpha = f.alpha;
-    ctx.drawImage(sprite, f.x - d / 2, f.y - d / 2, d, d);
+  if (!theme.tumble) {
+    for (const f of flakes) {
+      const d = f.r * theme.drawScale;
+      ctx.globalAlpha = f.alpha;
+      ctx.drawImage(f.img, f.x - d / 2, f.y - d / 2, d, d);
+    }
+  } else {
+    // Rotate and "turn over" each leaf / petal (squash it sideways as it flips).
+    for (const f of flakes) {
+      const d = f.r * theme.drawScale;
+      const c = Math.cos(f.rot);
+      const s = Math.sin(f.rot);
+      const sx = 0.25 + 0.75 * Math.abs(Math.cos(f.flip));
+      ctx.globalAlpha = f.alpha;
+      ctx.setTransform(c * sx * dpr, s * sx * dpr, -s * dpr, c * dpr, f.x * dpr, f.y * dpr);
+      ctx.drawImage(f.img, -d / 2, -d / 2, d, d);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   ctx.globalAlpha = 1;
 }
@@ -558,6 +593,10 @@ function frame(t) {
   ctx.clearRect(0, 0, W, H);
   for (const p of windowPiles) p.draw(3);
   ground.draw(6);
+  if (theme.tumble) {
+    for (const p of windowPiles) p.drawDecals();
+    ground.drawDecals();
+  }
   drawBulldozer();
   drawFlakes();
   requestAnimationFrame(frame);
@@ -584,9 +623,18 @@ window.addEventListener('resize', () => {
 let pendingWindows = [];
 window.snow.onConfig((next) => {
   const firstConfig = flakes.length === 0;
+  const themeChanged = next.theme && next.theme !== cfg.theme;
   cfg = { ...cfg, ...next };
+  if (themeChanged) {
+    // New season: start fresh with the new theme's particles and empty piles.
+    theme = window.THEMES.get(cfg.theme);
+    flakes = [];
+    extraCount = 0;
+    ground.clear();
+    for (const p of windowPiles) p.clear();
+  }
   resize();
-  adjustFlakeCount(firstConfig);
+  adjustFlakeCount(firstConfig || themeChanged);
   setWindows(pendingWindows);
   if (cfg.enabled) start();
   else stop();
