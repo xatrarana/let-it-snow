@@ -1,10 +1,10 @@
 {
   "name": "let-it-snow",
   "productName": "Let It Snow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Gentle snow falling on your desktop, plus a snow globe Christmas countdown.",
   "main": "src/main.js",
-  "author": "xatrarana",
+  "author": "Chhatra Rana",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
