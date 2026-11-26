@@ -1,7 +1,5 @@
 # Let It Snow ❄️
 
-[![Build](https://github.com/xatrarana/let-it-snow/actions/workflows/build.yml/badge.svg)](https://github.com/xatrarana/let-it-snow/actions/workflows/build.yml)
-
 A tiny desktop app for Windows and macOS that makes snow fall gently over your screen
 and shows a snow globe counting down to Christmas.
 
@@ -41,10 +39,6 @@ or menu bar (Mac, top right). There is no window or dock icon on purpose.
 npm run dist:win   # on Windows -> dist/Let It Snow Setup.exe and a portable .exe
 npm run dist:mac   # on a Mac    -> dist/Let It Snow.dmg (Intel + Apple Silicon)
 ```
-
-Or let GitHub build them: every push to `main` runs the **Build** workflow, and the
-installers show up under **Artifacts** on the run in the Actions tab. Push a tag like
-`v0.1.0` to also publish them on a GitHub Release.
 
 The builds are **unsigned** for now. Windows will show a SmartScreen warning ("More info" →
 "Run anyway") and macOS needs right-click → Open the first time. To sell it, add code
